@@ -46,6 +46,7 @@ class JobSchema(BaseModel):
     voice_id: str
     speaking_rate: float
     char_count: int
+    attempt_count: int
     page_count: int | None
     duration_seconds: float | None
     error_message: str | None

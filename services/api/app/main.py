@@ -16,7 +16,7 @@ from tts_shared.config import get_settings
 from tts_shared.database import SessionLocal, init_db
 from tts_shared.models import Job
 from tts_shared.pdf_utils import PdfValidationError, extract_text_from_pdf
-from tts_shared.queue import enqueue_job, read_capabilities
+from tts_shared.queue import clear_job, enqueue_job, read_capabilities, remove_pending_job
 from tts_shared.schemas import (
     AuthLoginSchema,
     AuthSessionSchema,
@@ -214,6 +214,7 @@ async def create_job(
             voice_id=voice_id,
             speaking_rate=speaking_rate,
             char_count=len(normalized_text),
+            attempt_count=0,
             page_count=page_count,
         )
         session.add(job)
@@ -244,6 +245,8 @@ def cancel_job(job_id: str) -> JobSchema:
         job = _get_job_or_404(session, job_id)
         if job.status in {"completed", "failed"}:
             raise HTTPException(status_code=409, detail="Completed or failed jobs cannot be canceled.")
+        if job.status == "queued":
+            remove_pending_job(job.id)
         job.status = "canceled"
         job.progress_message = "Canceled"
         session.commit()
@@ -268,6 +271,9 @@ def get_audio_file(job_id: str) -> FileResponse:
 def delete_job(job_id: str) -> Response:
     with SessionLocal() as session:
         job = _get_job_or_404(session, job_id)
+        if job.status in {"queued", "processing"}:
+            raise HTTPException(status_code=409, detail="Cancel active jobs before deleting them.")
+        clear_job(job.id)
         if job.audio_path:
             Path(job.audio_path).unlink(missing_ok=True)
         if job.source_path:

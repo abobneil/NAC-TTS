@@ -27,6 +27,7 @@ export type Job = {
   voice_id: string;
   speaking_rate: number;
   char_count: number;
+  attempt_count: number;
   page_count: number | null;
   duration_seconds: number | null;
   error_message: string | null;

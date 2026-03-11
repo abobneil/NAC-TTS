@@ -45,6 +45,7 @@ class Settings:
     max_pages: int
     max_chars: int
     max_active_jobs: int
+    max_job_retries: int
     queue_name: str
     cors_allow_origins: list[str]
     app_access_token: str
@@ -78,6 +79,7 @@ def get_settings() -> Settings:
         max_pages=int(os.getenv("MAX_PAGES", "100")),
         max_chars=int(os.getenv("MAX_CHARS", "80000")),
         max_active_jobs=int(os.getenv("MAX_ACTIVE_JOBS", "2")),
+        max_job_retries=int(os.getenv("MAX_JOB_RETRIES", "2")),
         queue_name=os.getenv("QUEUE_NAME", "tts:jobs"),
         cors_allow_origins=_csv_env(
             "CORS_ALLOW_ORIGINS",

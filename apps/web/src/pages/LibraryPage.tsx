@@ -41,8 +41,13 @@ export function LibraryPage() {
   }, []);
 
   async function handleDelete(jobId: string) {
-    await deleteJob(jobId);
-    setJobs((current) => current.filter((job) => job.id !== jobId));
+    try {
+      await deleteJob(jobId);
+      setJobs((current) => current.filter((job) => job.id !== jobId));
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete job.");
+    }
   }
 
   return (

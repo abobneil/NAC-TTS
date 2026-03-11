@@ -14,16 +14,52 @@ def get_redis() -> Redis:
     return Redis.from_url(settings.redis_url, decode_responses=True)
 
 
+def _pending_queue_name() -> str:
+    return settings.queue_name
+
+
+def _processing_queue_name() -> str:
+    return f"{settings.queue_name}:processing"
+
+
 def enqueue_job(job_id: str) -> None:
-    get_redis().lpush(settings.queue_name, job_id)
+    redis = get_redis()
+    redis.lrem(_pending_queue_name(), 0, job_id)
+    redis.lrem(_processing_queue_name(), 0, job_id)
+    redis.lpush(_pending_queue_name(), job_id)
 
 
-def pop_job(timeout_seconds: int = 5) -> str | None:
-    item = get_redis().brpop(settings.queue_name, timeout=timeout_seconds)
-    if item is None:
-        return None
-    _, job_id = item
-    return job_id
+def reserve_job(timeout_seconds: int = 5) -> str | None:
+    return get_redis().brpoplpush(_pending_queue_name(), _processing_queue_name(), timeout=timeout_seconds)
+
+
+def ack_job(job_id: str) -> None:
+    get_redis().lrem(_processing_queue_name(), 0, job_id)
+
+
+def requeue_job(job_id: str) -> None:
+    redis = get_redis()
+    redis.lrem(_processing_queue_name(), 0, job_id)
+    redis.lrem(_pending_queue_name(), 0, job_id)
+    redis.lpush(_pending_queue_name(), job_id)
+
+
+def remove_pending_job(job_id: str) -> None:
+    get_redis().lrem(_pending_queue_name(), 0, job_id)
+
+
+def clear_job(job_id: str) -> None:
+    redis = get_redis()
+    redis.lrem(_pending_queue_name(), 0, job_id)
+    redis.lrem(_processing_queue_name(), 0, job_id)
+
+
+def list_pending_jobs() -> list[str]:
+    return get_redis().lrange(_pending_queue_name(), 0, -1)
+
+
+def list_processing_jobs() -> list[str]:
+    return get_redis().lrange(_processing_queue_name(), 0, -1)
 
 
 def publish_capabilities(payload: dict) -> None:

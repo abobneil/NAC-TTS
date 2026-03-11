@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import type { Job } from "../lib/api";
 import { StatusPill } from "./StatusPill";
 
+const ACTIVE_STATUSES = new Set(["queued", "processing"]);
+
 type Props = {
   job: Job;
   onDelete: (jobId: string) => Promise<void>;
@@ -35,9 +37,11 @@ export function JobCard({ job, onDelete }: Props) {
             Download
           </a>
         ) : null}
-        <button type="button" className="ghost-button" onClick={() => onDelete(job.id)}>
-          Delete
-        </button>
+        {!ACTIVE_STATUSES.has(job.status) ? (
+          <button type="button" className="ghost-button" onClick={() => onDelete(job.id)}>
+            Delete
+          </button>
+        ) : null}
       </div>
     </article>
   );

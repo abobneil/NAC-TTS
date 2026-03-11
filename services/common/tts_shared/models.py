@@ -27,6 +27,7 @@ class Job(Base):
     voice_id: Mapped[str] = mapped_column(String(64))
     speaking_rate: Mapped[float] = mapped_column(Float)
     char_count: Mapped[int] = mapped_column(Integer)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     audio_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
