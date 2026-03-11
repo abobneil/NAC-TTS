@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,7 +19,17 @@ from tts_shared.text_utils import normalize_text
 
 
 settings = get_settings()
-app = FastAPI(title="NAC-TTS API", version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    for directory in [settings.uploads_dir, settings.audio_dir, settings.tmp_dir, settings.db_dir]:
+        directory.mkdir(parents=True, exist_ok=True)
+    init_db()
+    yield
+
+
+app = FastAPI(title="NAC-TTS API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,13 +44,6 @@ def to_job_schema(job: Job) -> JobSchema:
     if job.audio_path and job.status == "completed":
         audio_url = f"/api/v1/jobs/{job.id}/file"
     return JobSchema.model_validate(job, from_attributes=True).model_copy(update={"audio_url": audio_url})
-
-
-@app.on_event("startup")
-def startup() -> None:
-    for directory in [settings.uploads_dir, settings.audio_dir, settings.tmp_dir, settings.db_dir]:
-        directory.mkdir(parents=True, exist_ok=True)
-    init_db()
 
 
 @app.get("/api/v1/health")
