@@ -1,0 +1,7 @@
+tunnel: ${CF_TUNNEL_ID}
+credentials-file: ${CF_TUNNEL_CREDENTIALS}
+
+ingress:
+  - hostname: ${CF_TUNNEL_HOSTNAME}
+    service: http://caddy:8080
+  - service: http_status:404

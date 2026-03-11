@@ -1,0 +1,71 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: "${DATABASE_URL:-sqlite:////data/db/nac_tts.sqlite3}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+      STORAGE_ROOT: /data
+    depends_on:
+      - redis
+    volumes:
+      - ../../storage:/data
+    expose:
+      - "8000"
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: services/worker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: "${DATABASE_URL:-sqlite:////data/db/nac_tts.sqlite3}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
+      STORAGE_ROOT: /data
+      KOKORO_DEVICE: "${KOKORO_DEVICE:-cuda}"
+    depends_on:
+      - redis
+      - api
+    volumes:
+      - ../../storage:/data
+    gpus: all
+
+  caddy:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    depends_on:
+      - api
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    profiles:
+      - tunnel
+    command:
+      - tunnel
+      - --config
+      - /etc/cloudflared/config.yml
+      - run
+    volumes:
+      - ./cloudflared-config.yml:/etc/cloudflared/config.yml:ro
+      - ../../cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - caddy
