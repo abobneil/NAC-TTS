@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+import logging
 import shutil
+import time
 import traceback
 from typing import Literal
 
@@ -12,12 +14,26 @@ from sqlalchemy import select
 from tts_shared.audio_utils import combine_wavs, wav_to_mp3, write_silence
 from tts_shared.config import get_settings
 from tts_shared.database import SessionLocal, init_db
+from tts_shared.logging_utils import configure_json_logging, log_event
 from tts_shared.models import Job
-from tts_shared.queue import ack_job, clear_job, enqueue_job, list_pending_jobs, list_processing_jobs, publish_capabilities, requeue_job, reserve_job
+from tts_shared.queue import (
+    ack_job,
+    clear_job,
+    enqueue_job,
+    list_pending_jobs,
+    list_processing_jobs,
+    publish_capabilities,
+    queue_depth,
+    record_worker_heartbeat,
+    requeue_job,
+    reserve_job,
+)
+from tts_shared.retention import sweep_retention
 from tts_shared.text_utils import chunk_text
 
 
 settings = get_settings()
+logger = logging.getLogger("nac_tts.worker")
 
 
 class JobCanceledError(RuntimeError):
@@ -221,6 +237,7 @@ def process_job(engine: KokoroEngine, job_id: str) -> Literal["completed", "retr
 
 def handle_reserved_job(engine: KokoroEngine, job_id: str) -> None:
     outcome = process_job(engine, job_id)
+    log_event(logger, "job_processed", service="worker", job_id=job_id, outcome=outcome)
     if outcome == "retry":
         requeue_job(job_id)
         return
@@ -283,16 +300,26 @@ def reconcile_jobs() -> None:
 
 
 def main() -> None:
+    configure_json_logging("worker")
     for directory in [settings.uploads_dir, settings.audio_dir, settings.tmp_dir, settings.db_dir]:
         directory.mkdir(parents=True, exist_ok=True)
     init_db()
+    retention_result = sweep_retention()
+    log_event(logger, "retention_sweep", service="worker", **retention_result)
     reconcile_jobs()
     engine = KokoroEngine()
     publish_capabilities(engine.capabilities())
+    last_retention_sweep = time.monotonic()
     while True:
+        record_worker_heartbeat()
         job_id = reserve_job()
         if job_id:
+            log_event(logger, "job_reserved", service="worker", job_id=job_id, **queue_depth())
             handle_reserved_job(engine, job_id)
+        if time.monotonic() - last_retention_sweep >= settings.retention_sweep_interval_seconds:
+            retention_result = sweep_retention()
+            log_event(logger, "retention_sweep", service="worker", **retention_result)
+            last_retention_sweep = time.monotonic()
 
 
 if __name__ == "__main__":

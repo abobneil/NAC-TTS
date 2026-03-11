@@ -47,6 +47,10 @@ class Settings:
     max_active_jobs: int
     max_job_retries: int
     queue_name: str
+    worker_heartbeat_ttl_seconds: int
+    tmp_retention_hours: int
+    audio_retention_days: int
+    retention_sweep_interval_seconds: int
     cors_allow_origins: list[str]
     app_access_token: str
     auth_session_secret: str
@@ -81,6 +85,10 @@ def get_settings() -> Settings:
         max_active_jobs=int(os.getenv("MAX_ACTIVE_JOBS", "2")),
         max_job_retries=int(os.getenv("MAX_JOB_RETRIES", "2")),
         queue_name=os.getenv("QUEUE_NAME", "tts:jobs"),
+        worker_heartbeat_ttl_seconds=int(os.getenv("WORKER_HEARTBEAT_TTL_SECONDS", "30")),
+        tmp_retention_hours=int(os.getenv("TMP_RETENTION_HOURS", "12")),
+        audio_retention_days=int(os.getenv("AUDIO_RETENTION_DAYS", "30")),
+        retention_sweep_interval_seconds=int(os.getenv("RETENTION_SWEEP_INTERVAL_SECONDS", "300")),
         cors_allow_origins=_csv_env(
             "CORS_ALLOW_ORIGINS",
             "http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173",

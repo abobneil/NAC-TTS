@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import importlib
 import sys
+import time
 
 from fastapi.testclient import TestClient
 
@@ -283,3 +284,17 @@ def test_delete_rejects_active_jobs(tmp_path: Path, monkeypatch) -> None:
         response = client.delete("/api/v1/jobs/active")
         assert response.status_code == 409
         assert "Cancel active jobs" in response.json()["detail"]
+
+
+def test_readiness_reports_worker_health_and_queue_depth(tmp_path: Path, monkeypatch) -> None:
+    module = load_module(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "read_worker_heartbeat", lambda: time.time())
+    monkeypatch.setattr(module, "queue_depth", lambda: {"pending": 2, "processing": 1})
+
+    with TestClient(module.app) as client:
+        response = client.get("/api/v1/ready")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["queue"] == {"pending": 2, "processing": 1}
+        assert payload["worker"]["status"] == "ok"

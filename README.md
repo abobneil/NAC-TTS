@@ -39,3 +39,4 @@ docker compose -f ops/docker/docker-compose.yml up --build
 - Scanned PDFs are rejected in v1 because OCR is out of scope.
 - Remote-access setup and auth details are documented in [`docs/authentication.md`](docs/authentication.md).
 - Migration and backup/restore guidance is documented in [`docs/persistence.md`](docs/persistence.md).
+- Health, logging, and retention guidance is documented in [`docs/operations.md`](docs/operations.md).

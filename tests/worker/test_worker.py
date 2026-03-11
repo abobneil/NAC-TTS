@@ -40,6 +40,9 @@ class FakeRedis:
             end = len(items) - 1
         return items[start : end + 1]
 
+    def llen(self, name: str) -> int:
+        return len(self.lists.get(name, []))
+
     def set(self, name: str, value: str) -> None:
         self.values[name] = value
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from redis import Redis
 
@@ -20,6 +21,14 @@ def _pending_queue_name() -> str:
 
 def _processing_queue_name() -> str:
     return f"{settings.queue_name}:processing"
+
+
+def _worker_heartbeat_key() -> str:
+    return f"{settings.queue_name}:worker:heartbeat"
+
+
+def _capabilities_key() -> str:
+    return "tts:capabilities"
 
 
 def enqueue_job(job_id: str) -> None:
@@ -62,10 +71,27 @@ def list_processing_jobs() -> list[str]:
     return get_redis().lrange(_processing_queue_name(), 0, -1)
 
 
+def queue_depth() -> dict[str, int]:
+    redis = get_redis()
+    return {
+        "pending": int(redis.llen(_pending_queue_name())),
+        "processing": int(redis.llen(_processing_queue_name())),
+    }
+
+
+def record_worker_heartbeat(now: float | None = None) -> None:
+    get_redis().set(_worker_heartbeat_key(), str(now if now is not None else time.time()))
+
+
+def read_worker_heartbeat() -> float | None:
+    raw = get_redis().get(_worker_heartbeat_key())
+    return float(raw) if raw else None
+
+
 def publish_capabilities(payload: dict) -> None:
-    get_redis().set("tts:capabilities", json.dumps(payload))
+    get_redis().set(_capabilities_key(), json.dumps(payload))
 
 
 def read_capabilities() -> dict | None:
-    raw = get_redis().get("tts:capabilities")
+    raw = get_redis().get(_capabilities_key())
     return json.loads(raw) if raw else None

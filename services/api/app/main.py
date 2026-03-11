@@ -2,21 +2,25 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import logging
 import secrets
+import time
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func, select
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import is_authenticated, require_auth
 from tts_shared.config import get_settings
 from tts_shared.database import SessionLocal, init_db
+from tts_shared.logging_utils import configure_json_logging, log_event
 from tts_shared.models import Job
 from tts_shared.pdf_utils import PdfValidationError, extract_text_from_pdf
-from tts_shared.queue import clear_job, enqueue_job, read_capabilities, remove_pending_job
+from tts_shared.queue import clear_job, enqueue_job, queue_depth, read_capabilities, read_worker_heartbeat, remove_pending_job
+from tts_shared.retention import sweep_retention
 from tts_shared.schemas import (
     AuthLoginSchema,
     AuthSessionSchema,
@@ -31,13 +35,17 @@ from tts_shared.text_utils import normalize_text
 
 
 settings = get_settings()
+logger = logging.getLogger("nac_tts.api")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    configure_json_logging("api")
     for directory in [settings.uploads_dir, settings.audio_dir, settings.tmp_dir, settings.db_dir]:
         directory.mkdir(parents=True, exist_ok=True)
     init_db()
+    retention_result = sweep_retention()
+    log_event(logger, "retention_sweep", service="api", **retention_result)
     yield
 
 
@@ -58,6 +66,23 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    started = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = round((time.perf_counter() - started) * 1000, 2)
+    log_event(
+        logger,
+        "http_request",
+        service="api",
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+    )
+    return response
+
+
 def to_job_schema(job: Job) -> JobSchema:
     audio_url = None
     if job.audio_path and job.status == "completed":
@@ -70,6 +95,38 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/v1/ready")
+def readiness() -> JSONResponse:
+    try:
+        with SessionLocal() as session:
+            session.execute(select(1))
+        depths = queue_depth()
+        heartbeat = read_worker_heartbeat()
+    except Exception as exc:
+        log_event(logger, "readiness_failed", service="api", error=str(exc))
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "api": "ok", "redis": "down", "worker": "unknown"},
+        )
+
+    now = time.time()
+    worker_ok = heartbeat is not None and (now - heartbeat) <= settings.worker_heartbeat_ttl_seconds
+    status_code = 200 if worker_ok else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ok" if worker_ok else "degraded",
+            "api": "ok",
+            "redis": "ok",
+            "worker": {
+                "status": "ok" if worker_ok else "stale",
+                "last_heartbeat": heartbeat,
+            },
+            "queue": depths,
+        },
+    )
+
+
 @app.post("/api/v1/auth/login", status_code=204, response_class=Response)
 def login(payload: AuthLoginSchema, request: Request) -> Response:
     if not secrets.compare_digest(payload.access_token, settings.app_access_token):
@@ -80,12 +137,14 @@ def login(payload: AuthLoginSchema, request: Request) -> Response:
         )
     request.session.clear()
     request.session["authenticated"] = True
+    log_event(logger, "login_succeeded", service="api")
     return Response(status_code=204)
 
 
 @app.post("/api/v1/auth/logout", status_code=204, response_class=Response)
 def logout(request: Request) -> Response:
     request.session.clear()
+    log_event(logger, "logout_succeeded", service="api")
     return Response(status_code=204)
 
 
