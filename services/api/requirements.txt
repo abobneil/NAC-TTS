@@ -8,5 +8,6 @@ PyMuPDF==1.26.4
 soundfile==0.13.1
 numpy==2.3.3
 itsdangerous==2.2.0
+alembic==1.16.5
 pytest==8.4.1
 httpx==0.28.1

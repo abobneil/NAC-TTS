@@ -38,3 +38,4 @@ docker compose -f ops/docker/docker-compose.yml up --build
 - GPU acceleration requires Docker Desktop GPU support and a working NVIDIA driver.
 - Scanned PDFs are rejected in v1 because OCR is out of scope.
 - Remote-access setup and auth details are documented in [`docs/authentication.md`](docs/authentication.md).
+- Migration and backup/restore guidance is documented in [`docs/persistence.md`](docs/persistence.md).
