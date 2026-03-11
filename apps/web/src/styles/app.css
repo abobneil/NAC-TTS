@@ -42,12 +42,30 @@ select {
   padding: 24px 18px 48px;
 }
 
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.auth-card {
+  width: min(100%, 520px);
+}
+
 .app-header {
   display: flex;
   justify-content: space-between;
   gap: 16px;
   align-items: end;
   margin-bottom: 24px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: end;
 }
 
 .app-header h1,
@@ -293,5 +311,9 @@ small {
 
   .app-shell {
     padding-inline: 14px;
+  }
+
+  .header-actions {
+    justify-content: start;
   }
 }

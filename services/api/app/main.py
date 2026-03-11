@@ -2,19 +2,31 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import secrets
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, select
+from starlette.middleware.sessions import SessionMiddleware
 
+from .auth import is_authenticated, require_auth
 from tts_shared.config import get_settings
 from tts_shared.database import SessionLocal, init_db
 from tts_shared.models import Job
 from tts_shared.pdf_utils import PdfValidationError, extract_text_from_pdf
 from tts_shared.queue import enqueue_job, read_capabilities
-from tts_shared.schemas import CapabilitiesSchema, JobCreatedSchema, JobListSchema, JobSchema, LimitsSchema, VoiceSchema
+from tts_shared.schemas import (
+    AuthLoginSchema,
+    AuthSessionSchema,
+    CapabilitiesSchema,
+    JobCreatedSchema,
+    JobListSchema,
+    JobSchema,
+    LimitsSchema,
+    VoiceSchema,
+)
 from tts_shared.text_utils import normalize_text
 
 
@@ -31,11 +43,18 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="NAC-TTS API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.auth_session_secret,
+    same_site="lax",
+    https_only=settings.auth_cookie_secure,
+    max_age=settings.auth_session_ttl_seconds,
+)
+app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -51,7 +70,31 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/api/v1/capabilities", response_model=CapabilitiesSchema)
+@app.post("/api/v1/auth/login", status_code=204, response_class=Response)
+def login(payload: AuthLoginSchema, request: Request) -> Response:
+    if not secrets.compare_digest(payload.access_token, settings.app_access_token):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid access token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    request.session.clear()
+    request.session["authenticated"] = True
+    return Response(status_code=204)
+
+
+@app.post("/api/v1/auth/logout", status_code=204, response_class=Response)
+def logout(request: Request) -> Response:
+    request.session.clear()
+    return Response(status_code=204)
+
+
+@app.get("/api/v1/auth/session", response_model=AuthSessionSchema)
+def auth_session(request: Request) -> AuthSessionSchema:
+    return AuthSessionSchema(authenticated=is_authenticated(request))
+
+
+@app.get("/api/v1/capabilities", response_model=CapabilitiesSchema, dependencies=[Depends(require_auth)])
 def capabilities() -> CapabilitiesSchema:
     payload = read_capabilities()
     if payload:
@@ -101,7 +144,7 @@ def _get_job_or_404(session, job_id: str) -> Job:
     return job
 
 
-@app.post("/api/v1/jobs", response_model=JobCreatedSchema, status_code=202)
+@app.post("/api/v1/jobs", response_model=JobCreatedSchema, status_code=202, dependencies=[Depends(require_auth)])
 async def create_job(
     title: str = Form(""),
     source_type: str = Form(...),
@@ -180,7 +223,7 @@ async def create_job(
     return JobCreatedSchema(job_id=job_id, status="queued")
 
 
-@app.get("/api/v1/jobs", response_model=JobListSchema)
+@app.get("/api/v1/jobs", response_model=JobListSchema, dependencies=[Depends(require_auth)])
 def list_jobs(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)) -> JobListSchema:
     with SessionLocal() as session:
         items = session.scalars(select(Job).order_by(Job.created_at.desc()).limit(limit).offset(offset)).all()
@@ -188,14 +231,14 @@ def list_jobs(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)
     return JobListSchema(items=[to_job_schema(item) for item in items], total=total)
 
 
-@app.get("/api/v1/jobs/{job_id}", response_model=JobSchema)
+@app.get("/api/v1/jobs/{job_id}", response_model=JobSchema, dependencies=[Depends(require_auth)])
 def get_job(job_id: str) -> JobSchema:
     with SessionLocal() as session:
         job = _get_job_or_404(session, job_id)
         return to_job_schema(job)
 
 
-@app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobSchema)
+@app.post("/api/v1/jobs/{job_id}/cancel", response_model=JobSchema, dependencies=[Depends(require_auth)])
 def cancel_job(job_id: str) -> JobSchema:
     with SessionLocal() as session:
         job = _get_job_or_404(session, job_id)
@@ -208,7 +251,7 @@ def cancel_job(job_id: str) -> JobSchema:
         return to_job_schema(job)
 
 
-@app.get("/api/v1/jobs/{job_id}/file")
+@app.get("/api/v1/jobs/{job_id}/file", dependencies=[Depends(require_auth)])
 def get_audio_file(job_id: str) -> FileResponse:
     with SessionLocal() as session:
         job = _get_job_or_404(session, job_id)
@@ -221,7 +264,7 @@ def get_audio_file(job_id: str) -> FileResponse:
         return FileResponse(path=path, media_type="audio/mpeg", filename=filename)
 
 
-@app.delete("/api/v1/jobs/{job_id}", status_code=204, response_class=Response)
+@app.delete("/api/v1/jobs/{job_id}", status_code=204, response_class=Response, dependencies=[Depends(require_auth)])
 def delete_job(job_id: str) -> Response:
     with SessionLocal() as session:
         job = _get_job_or_404(session, job_id)

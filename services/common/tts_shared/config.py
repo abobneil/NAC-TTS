@@ -11,6 +11,15 @@ class VoiceOption:
     label: str
 
 
+def _csv_env(name: str, default: str) -> list[str]:
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name, str(default)).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _voice_label(voice_id: str) -> str:
     parts = voice_id.split("_", 1)
     if len(parts) == 2:
@@ -37,6 +46,11 @@ class Settings:
     max_chars: int
     max_active_jobs: int
     queue_name: str
+    cors_allow_origins: list[str]
+    app_access_token: str
+    auth_session_secret: str
+    auth_cookie_secure: bool
+    auth_session_ttl_seconds: int
     sample_rate: int = 24000
     silence_ms: int = 350
 
@@ -65,4 +79,12 @@ def get_settings() -> Settings:
         max_chars=int(os.getenv("MAX_CHARS", "80000")),
         max_active_jobs=int(os.getenv("MAX_ACTIVE_JOBS", "2")),
         queue_name=os.getenv("QUEUE_NAME", "tts:jobs"),
+        cors_allow_origins=_csv_env(
+            "CORS_ALLOW_ORIGINS",
+            "http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173",
+        ),
+        app_access_token=os.getenv("APP_ACCESS_TOKEN", "change-me-access-token"),
+        auth_session_secret=os.getenv("AUTH_SESSION_SECRET", "change-me-session-secret"),
+        auth_cookie_secure=_bool_env("AUTH_COOKIE_SECURE", False),
+        auth_session_ttl_seconds=int(os.getenv("AUTH_SESSION_TTL_SECONDS", str(12 * 60 * 60))),
     )

@@ -25,6 +25,14 @@ class CapabilitiesSchema(BaseModel):
     sample_rate: int
 
 
+class AuthLoginSchema(BaseModel):
+    access_token: str
+
+
+class AuthSessionSchema(BaseModel):
+    authenticated: bool
+
+
 class JobSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
