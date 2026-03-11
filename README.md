@@ -2,6 +2,8 @@
 
 Self-hosted local GPU text-to-speech with a mobile-friendly PWA frontend.
 
+Production deployment and go-live steps live in [`docs/runbook.md`](docs/runbook.md).
+
 ## Stack
 
 - FastAPI API with SQLite metadata
@@ -37,6 +39,7 @@ docker compose -f ops/docker/docker-compose.yml up --build
 - The worker image installs `espeak-ng` and `ffmpeg`.
 - GPU acceleration requires Docker Desktop GPU support and a working NVIDIA driver.
 - Scanned PDFs are rejected in v1 because OCR is out of scope.
+- The full production deployment and go-live procedure is documented in [`docs/runbook.md`](docs/runbook.md).
 - Remote-access setup and auth details are documented in [`docs/authentication.md`](docs/authentication.md).
 - Migration and backup/restore guidance is documented in [`docs/persistence.md`](docs/persistence.md).
 - Health, logging, and retention guidance is documented in [`docs/operations.md`](docs/operations.md).
