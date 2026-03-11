@@ -22,6 +22,7 @@ NAC-TTS now expects a shared deployment access token for all non-health API usag
 - Generate both secrets with a password manager or a command such as `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 - Use explicit origins such as `https://tts.example.com`.
 - Do not keep localhost origins in `CORS_ALLOW_ORIGINS` for an internet-facing deployment.
+- `CORS_ALLOW_ORIGINS` must be a comma-separated list of exact origins only. Do not include paths, query strings, fragments, or `*`.
 
 ## Cloudflare Tunnel guidance
 

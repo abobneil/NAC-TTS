@@ -57,7 +57,12 @@ def test_public_health_and_session_status(tmp_path: Path, monkeypatch) -> None:
     app = load_app(tmp_path, monkeypatch)
 
     with TestClient(app) as client:
-        assert client.get("/api/v1/health").status_code == 200
+        health = client.get("/api/v1/health")
+        assert health.status_code == 200
+        assert health.headers["cache-control"] == "no-store"
+        assert health.headers["x-content-type-options"] == "nosniff"
+        assert health.headers["x-frame-options"] == "DENY"
+        assert health.headers["referrer-policy"] == "no-referrer"
         assert client.get("/api/v1/auth/session").json() == {"authenticated": False}
 
 
@@ -158,6 +163,19 @@ def test_invalid_login_is_rejected(tmp_path: Path, monkeypatch) -> None:
         assert client.get("/api/v1/auth/session").json() == {"authenticated": False}
 
 
+def test_login_rate_limit_blocks_repeated_failures(tmp_path: Path, monkeypatch) -> None:
+    app = load_app(tmp_path, monkeypatch)
+
+    with TestClient(app) as client:
+        for _ in range(5):
+            response = client.post("/api/v1/auth/login", json={"access_token": "wrong-token"})
+            assert response.status_code == 401
+
+        blocked = client.post("/api/v1/auth/login", json={"access_token": "wrong-token"})
+        assert blocked.status_code == 429
+        assert "Too many login attempts" in blocked.json()["detail"]
+
+
 def test_cors_uses_allowlist(tmp_path: Path, monkeypatch) -> None:
     app = load_app(tmp_path, monkeypatch)
 
@@ -182,6 +200,33 @@ def test_cors_uses_allowlist(tmp_path: Path, monkeypatch) -> None:
             },
         )
         assert blocked.status_code == 400
+
+
+def test_rejects_placeholder_auth_defaults(tmp_path: Path, monkeypatch) -> None:
+    storage_root = tmp_path / "storage"
+    for name in ["uploads", "audio", "tmp", "db"]:
+        (storage_root / name).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(storage_root / 'db' / 'test.sqlite3').as_posix()}")
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/15")
+    monkeypatch.setenv("APP_ACCESS_TOKEN", "replace-with-a-long-random-token")
+    monkeypatch.setenv("AUTH_SESSION_SECRET", "replace-with-a-different-long-random-secret")
+
+    for module_name in list(sys.modules):
+        if module_name.startswith("tts_shared"):
+            sys.modules.pop(module_name)
+
+    config_module = importlib.import_module("tts_shared.config")
+    try:
+        try:
+            config_module.get_settings()
+        except ValueError as exc:
+            assert "must be replaced" in str(exc)
+        else:
+            raise AssertionError("Expected placeholder auth secrets to be rejected.")
+    finally:
+        sys.modules.pop("tts_shared.config", None)
 
 
 def test_rejects_invalid_pdf_upload(tmp_path: Path, monkeypatch) -> None:

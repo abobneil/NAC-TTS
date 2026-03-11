@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
 import secrets
+from threading import Lock
 import time
 from uuid import uuid4
 
@@ -36,6 +38,12 @@ from tts_shared.text_utils import normalize_text
 
 settings = get_settings()
 logger = logging.getLogger("nac_tts.api")
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_BLOCK_SECONDS = 15 * 60
+_LOGIN_ATTEMPTS: dict[str, deque[float]] = {}
+_LOGIN_BLOCKED_UNTIL: dict[str, float] = {}
+_LOGIN_LOCK = Lock()
 
 
 @asynccontextmanager
@@ -61,9 +69,22 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.middleware("http")
+async def set_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), geolocation=(), microphone=()"
+    return response
 
 
 @app.middleware("http")
@@ -88,6 +109,62 @@ def to_job_schema(job: Job) -> JobSchema:
     if job.audio_path and job.status == "completed":
         audio_url = f"/api/v1/jobs/{job.id}/file"
     return JobSchema.model_validate(job, from_attributes=True).model_copy(update={"audio_url": audio_url})
+
+
+def _client_address(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _prune_login_attempts(client_address: str, now: float) -> deque[float]:
+    attempts = _LOGIN_ATTEMPTS.setdefault(client_address, deque())
+    cutoff = now - LOGIN_WINDOW_SECONDS
+    while attempts and attempts[0] <= cutoff:
+        attempts.popleft()
+    if not attempts:
+        _LOGIN_ATTEMPTS.pop(client_address, None)
+        return deque()
+    return attempts
+
+
+def _enforce_login_rate_limit(request: Request) -> None:
+    client_address = _client_address(request)
+    now = time.time()
+    with _LOGIN_LOCK:
+        blocked_until = _LOGIN_BLOCKED_UNTIL.get(client_address)
+        if blocked_until is not None:
+            if now < blocked_until:
+                raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+            _LOGIN_BLOCKED_UNTIL.pop(client_address, None)
+        attempts = _prune_login_attempts(client_address, now)
+        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+            _LOGIN_BLOCKED_UNTIL[client_address] = now + LOGIN_BLOCK_SECONDS
+            _LOGIN_ATTEMPTS.pop(client_address, None)
+            raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+
+
+def _record_failed_login(request: Request) -> None:
+    client_address = _client_address(request)
+    now = time.time()
+    with _LOGIN_LOCK:
+        attempts = _prune_login_attempts(client_address, now)
+        if not attempts:
+            attempts = _LOGIN_ATTEMPTS.setdefault(client_address, deque())
+        attempts.append(now)
+        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+            _LOGIN_BLOCKED_UNTIL[client_address] = now + LOGIN_BLOCK_SECONDS
+            _LOGIN_ATTEMPTS.pop(client_address, None)
+
+
+def _clear_failed_logins(request: Request) -> None:
+    client_address = _client_address(request)
+    with _LOGIN_LOCK:
+        _LOGIN_ATTEMPTS.pop(client_address, None)
+        _LOGIN_BLOCKED_UNTIL.pop(client_address, None)
 
 
 @app.get("/api/v1/health")
@@ -129,7 +206,9 @@ def readiness() -> JSONResponse:
 
 @app.post("/api/v1/auth/login", status_code=204, response_class=Response)
 def login(payload: AuthLoginSchema, request: Request) -> Response:
+    _enforce_login_rate_limit(request)
     if not secrets.compare_digest(payload.access_token, settings.app_access_token):
+        _record_failed_login(request)
         raise HTTPException(
             status_code=401,
             detail="Invalid access token.",
@@ -137,6 +216,7 @@ def login(payload: AuthLoginSchema, request: Request) -> Response:
         )
     request.session.clear()
     request.session["authenticated"] = True
+    _clear_failed_logins(request)
     log_event(logger, "login_succeeded", service="api")
     return Response(status_code=204)
 
@@ -179,10 +259,11 @@ def _ensure_voice(voice_id: str) -> None:
 
 
 def _sanitize_title(title: str, fallback: str) -> str:
-    value = title.strip()
+    value = "".join(char for char in title.strip() if char.isprintable()).replace("/", "-").replace("\\", "-")
     if value:
         return value[:255]
-    return fallback[:255] or "Untitled"
+    safe_fallback = "".join(char for char in fallback.strip() if char.isprintable()).replace("/", "-").replace("\\", "-")
+    return safe_fallback[:255] or "Untitled"
 
 
 def _persist_text(job_id: str, text: str) -> Path:

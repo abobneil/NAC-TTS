@@ -68,7 +68,7 @@ export function ConvertPage() {
           <h2>Queue narration from your phone or desktop.</h2>
         </div>
         <p className="muted">
-          The backend stays on your own machine. This PWA just packages text or PDFs and pulls finished MP3 files back down.
+          The backend stays on your own machine. This web app just packages text or PDFs and pulls finished MP3 files back down.
         </p>
       </div>
       <form className="card stack" onSubmit={handleSubmit}>

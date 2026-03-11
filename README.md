@@ -1,6 +1,6 @@
 # NAC-TTS
 
-Self-hosted local GPU text-to-speech with a mobile-friendly PWA frontend.
+Self-hosted local GPU text-to-speech with a mobile-friendly web frontend.
 
 Production deployment and go-live steps live in [`docs/runbook.md`](docs/runbook.md).
 
@@ -9,13 +9,13 @@ Production deployment and go-live steps live in [`docs/runbook.md`](docs/runbook
 - FastAPI API with SQLite metadata
 - Redis-backed worker
 - Kokoro TTS on NVIDIA GPU
-- React + Vite PWA
+- React + Vite frontend
 - Caddy for static hosting and API reverse proxy
 - Cloudflare Tunnel for remote access
 
 ## Repo Layout
 
-- `apps/web`: React/Vite PWA
+- `apps/web`: React/Vite frontend
 - `services/api`: FastAPI app
 - `services/worker`: Redis worker and Kokoro pipeline
 - `services/common`: shared backend modules

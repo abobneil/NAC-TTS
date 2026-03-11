@@ -46,11 +46,12 @@ Operational defaults to review intentionally:
 2. If this is not a localhost-only deployment:
    - set `AUTH_COOKIE_SECURE=true`
    - set `CORS_ALLOW_ORIGINS` to the exact public origin
-3. Build and start the stack:
+3. Confirm the app starts without any placeholder auth values. The API now fails fast if `APP_ACCESS_TOKEN` or `AUTH_SESSION_SECRET` still use example defaults.
+4. Build and start the stack:
    `docker compose -f ops/docker/docker-compose.yml up --build -d`
-4. Wait for services to become healthy:
+5. Wait for services to become healthy:
    `docker compose -f ops/docker/docker-compose.yml ps`
-5. If healthchecks fail, inspect logs:
+6. If healthchecks fail, inspect logs:
    `docker compose -f ops/docker/docker-compose.yml logs api worker redis --tail=200`
 
 ## Post-deploy validation
